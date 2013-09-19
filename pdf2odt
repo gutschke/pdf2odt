@@ -1,0 +1,152 @@
+#!/bin/bash -e
+
+# Usage: pdf2odt input.pdf ... output.odt
+#
+# This script converts one or more PDF files to an ODT file. The contents of
+# the PDF file(s) is first converted to a set of image files. These files
+# are then inserted as background images in the ODT file.
+#
+# N.B.: The script always generates ODT files that have letter format.
+#
+# Copyright (c) 2011 Markus Gutschke. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+# Check arguments
+[ $# -ge 2 ] || {
+  echo "Usage: $(basename "$0") input.pdf ... output.odt" >&2
+  exit 1
+}
+
+# Set up temporary staging directory
+TMPDIR="/tmp/pdf2odt.$$"
+[ \! -e "${TMPDIR}" ] || {
+  echo "Staging directory ${TMPDIR} already exists" >&2
+  exit 1
+}
+trap 'rm -rf "${TMPDIR}"' EXIT INT TERM QUIT HUP
+mkdir -p "${TMPDIR}"
+
+# Convert PDF file(s) to images
+mkdir -p "${TMPDIR}/Pictures"
+pdf=("$@"); unset pdf[$((${#pdf[@]}-1))]
+eval odt="\${$#}"
+i=0; while [ $i -lt ${#pdf[@]} ]; do
+  suffix="${pdf[$i]##*.}"
+  n=$(($(ls "${TMPDIR}/Pictures/Image-"* 2>/dev/null | wc -l) + 1))
+  case "$suffix" in
+    png|jpg)
+      if [ "$suffix" = "jpg" ]; then suffix="jpeg"; fi
+      cp "${pdf[$i]}" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
+      ;;
+    *)
+      gs -dNOPAUSE -sDEVICE=png256 -sOutputFile="${TMPDIR}/Pictures/TMP-%03d.png" \
+         -q -r300 -dBATCH "${pdf[$i]}"
+      for j in "${TMPDIR}/Pictures/TMP-"*".png"; do
+        mv "$j" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).png"
+        n=$(($n + 1))
+      done
+      ;;
+  esac
+  i=$(($i + 1))
+done
+mkdir -p "${TMPDIR}/META-INF"
+
+# Create "mimetype" file
+printf '%s' 'application/vnd.oasis.opendocument.text' >"${TMPDIR}/mimetype"
+
+# Create "META-INF/manifest.xml" file
+cat >"${TMPDIR}/META-INF/manifest.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">
+  <manifest:file-entry manifest:media-type="application/vnd.oasis.opendocument.text" manifest:version="1.2" manifest:full-path="/"/>
+  <manifest:file-entry manifest:media-type="text/xml" manifest:full-path="content.xml"/>
+  <manifest:file-entry manifest:media-type="text/xml" manifest:full-path="styles.xml"/>
+  <manifest:file-entry manifest:media-type="" manifest:full-path="Pictures/"/>
+EOF
+ls "${TMPDIR}/Pictures/"*.{png,jpeg} 2>/dev/null | sort | \
+  sed 's/^.*\/Pictures\/\([^.]*[.]\)\(.*\)/  <manifest:file-entry manifest:media-type="image\/\2" manifest:full-path="Pictures\/\1\2/;s/$/"\/>/' >>"${TMPDIR}/META-INF/manifest.xml"
+echo '</manifest:manifest>' >>"${TMPDIR}/META-INF/manifest.xml"
+
+# Create "content.xml" file
+cat >"${TMPDIR}/content.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+ xmlns:grddl="http://www.w3.org/2003/g/data-view#"
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ grddl:transformation="http://docs.oasis-open.org/office/1.2/xslt/odf2rdf.xsl"
+ office:version="1.2">
+  <office:automatic-styles>
+EOF
+ls "${TMPDIR}/Pictures/"*.{png,jpeg} 2>/dev/null | sort | \
+  sed 's/^.*\/Pictures\/Image-\([0-9]*\)[.].*/    <style:style style:name="Image\1" style:family="paragraph" style:master-page-name="Image\1"><style:paragraph-properties style:page-number="auto"\/><\/style:style>/' >>"${TMPDIR}/content.xml"
+cat >>"${TMPDIR}/content.xml" <<'EOF'
+  </office:automatic-styles>
+  <office:body>
+    <office:text text:use-soft-page-breaks="true">
+EOF
+ls "${TMPDIR}/Pictures/"*.{png,jpeg} 2>/dev/null | sort | \
+  sed 's/^.*\/Pictures\/Image-\([0-9]*\)[.].*/      <text:p text:style-name="Image\1"\/>/' >>"${TMPDIR}/content.xml"
+cat >>"${TMPDIR}/content.xml" <<'EOF'
+    </office:text>
+  </office:body>
+</office:document-content>
+EOF
+
+# Create "styles.xml" file
+cat >"${TMPDIR}/styles.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ xmlns:grddl="http://www.w3.org/2003/g/data-view#"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ grddl:transformation="http://docs.oasis-open.org/office/1.2/xslt/odf2rdf.xsl"
+ office:version="1.2">
+  <office:automatic-styles>
+EOF
+ls "${TMPDIR}/Pictures/"*.{png,jpeg} 2>/dev/null | sort | \
+  sed 's/^.*\/Pictures\/Image-\([0-9]*\)[.]\(.*\)/    <style:page-layout style:name="Image\1"><style:page-layout-properties fo:page-width="8.5in" fo:page-height="11in" style:num-format="1" style:print-orientation="portrait" fo:margin-top="0in" fo:margin-bottom="0in" fo:margin-left="0in" fo:margin-right="0in" fo:background-color="transparent" style:writing-mode="lr-tb" style:footnote-max-height="0in"><style:background-image xlink:href="Pictures\/Image-\1.\2" xlink:type="simple" xlink:actuate="onLoad" style:position="center center" style:repeat="no-repeat"\/><\/style:page-layout-properties><\/style:page-layout>/' >>"${TMPDIR}/styles.xml"
+cat >>"${TMPDIR}/styles.xml" <<'EOF'
+  </office:automatic-styles>
+  <office:master-styles>
+EOF
+ls "${TMPDIR}/Pictures/"*.{png,jpeg} 2>/dev/null | sort | \
+  sed 's/^.*\/Pictures\/Image-\([0-9]*\)[.].*/    <style:master-page style:name="Image\1" style:page-layout-name="Image\1"\/>/' >>"${TMPDIR}/styles.xml"
+cat >>"${TMPDIR}/styles.xml" <<'EOF'
+  </office:master-styles>
+</office:document-styles>
+EOF
+
+# Pack individual files into ODT archive
+[ "x${odt}" = "x${odt#/}" ] && odt="${PWD}/${odt}" || :
+rm -f "${odt}"
+cd "${TMPDIR}" &&
+  zip -m -q -X -0 "${odt}" mimetype &&
+  zip -m -q -X    "${odt}" $(find . -name mimetype -o -type f -print) &&
+  cd ..
+
+# Clean up
+rm -rf "${TMPDIR}"
+trap '' EXIT INT TERM QUIT HUP
+
+# Done
+exit 0
