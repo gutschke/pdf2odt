@@ -2,9 +2,9 @@
 
 # Usage: pdf2odt input.pdf ... output.odt
 #
-# This script converts one or more PDF files to an ODT file. The contents of
-# the PDF file(s) is first converted to a set of image files. These files
-# are then inserted as background images in the ODT file.
+# This script converts one or more PDF, JPG, or PNG files to an ODT file.
+# The contents of any PDF file(s) is first converted to a set of image
+# files. These files are then inserted as background images in the ODT file.
 #
 # N.B.: The script always generates ODT files that have letter format.
 #
@@ -30,9 +30,18 @@
 
 # Check arguments
 [ $# -ge 2 ] || {
-  echo "Usage: $(basename "$0") input.pdf ... output.odt" >&2
+  echo "Usage: $(basename "$0") input.{jpg,pdf,png} ... output.odt" >&2
   exit 1
 }
+
+# Don't overwrite the output file, unless it is an ODT file already.
+# This protects users from overwriting input files, if they completely
+# forgot to specify any output file.
+eval odt="\${$#}"
+if [ -e "${odt}" ] && [[ ! "$(file "${odt}" 2>/dev/null)" =~ "OpenDocument Text" ]]; then
+  echo "Did you forget to specify the output file name? \"${odt}\" exists, but is not an ODT file" >&2
+  exit 1
+fi
 
 # Set up temporary staging directory
 TMPDIR="/tmp/pdf2odt.$$"
@@ -43,17 +52,21 @@ TMPDIR="/tmp/pdf2odt.$$"
 trap 'rm -rf "${TMPDIR}"' EXIT INT TERM QUIT HUP
 mkdir -p "${TMPDIR}"
 
-# Convert PDF file(s) to images
+# Preprocess image file(s), and convert PDF file(s) to images
 mkdir -p "${TMPDIR}/Pictures"
 pdf=("$@"); unset pdf[$((${#pdf[@]}-1))]
-eval odt="\${$#}"
 i=0; while [ $i -lt ${#pdf[@]} ]; do
-  suffix="${pdf[$i]##*.}"
+  suffix="$(echo "${pdf[$i]##*.}"|tr A-Z a-z)"
   n=$(($(ls "${TMPDIR}/Pictures/Image-"* 2>/dev/null | wc -l) + 1))
   case "$suffix" in
-    png|jpg)
+    png|jpg|jpeg)
       if [ "$suffix" = "jpg" ]; then suffix="jpeg"; fi
-      cp "${pdf[$i]}" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
+      # Adjust DPI so that the image fits on a letter-sized page.
+      res="$(identify "${pdf[$i]}"|awk '{ print $3 }')"
+      dpiX=$((2*${res%x*}/17))
+      dpiY=$((${res#*x}/11))
+      if [ ${dpiX} -gt ${dpiY} ]; then dpi="${dpiX}"; else dpi="${dpiY}"; fi
+      convert "${pdf[$i]}" -set units PixelsPerInch -set density "${dpi}" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
       ;;
     *)
       gs -dNOPAUSE -sDEVICE=png256 -sOutputFile="${TMPDIR}/Pictures/TMP-%03d.png" \
