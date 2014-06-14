@@ -10,22 +10,23 @@
 #
 # Copyright (c) 2011 Markus Gutschke. All rights reserved.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
 
 
 # Check arguments
@@ -38,8 +39,10 @@
 # This protects users from overwriting input files, if they completely
 # forgot to specify any output file.
 eval odt="\${$#}"
-if [ -e "${odt}" ] && [[ ! "$(file "${odt}" 2>/dev/null)" =~ "OpenDocument Text" ]]; then
-  echo "Did you forget to specify the output file name? \"${odt}\" exists, but is not an ODT file" >&2
+if [ -e "${odt}" ] &&
+   [[ ! "$(file "${odt}" 2>/dev/null)" =~ "OpenDocument Text" ]]; then
+  echo "Did you forget to specify the output file name? \"${odt}\"" \
+       "exists, but is not an ODT file" >&2
   exit 1
 fi
 
@@ -66,10 +69,12 @@ i=0; while [ $i -lt ${#pdf[@]} ]; do
       dpiX=$((2*${res%x*}/17))
       dpiY=$((${res#*x}/11))
       if [ ${dpiX} -gt ${dpiY} ]; then dpi="${dpiX}"; else dpi="${dpiY}"; fi
-      convert "${pdf[$i]}" -set units PixelsPerInch -set density "${dpi}" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
+      convert "${pdf[$i]}" -set units PixelsPerInch -set density "${dpi}" \
+              "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
       ;;
     *)
-      gs -dNOPAUSE -sDEVICE=png256 -sOutputFile="${TMPDIR}/Pictures/TMP-%03d.png" \
+      gs -dNOPAUSE -sDEVICE=png256 \
+         -sOutputFile="${TMPDIR}/Pictures/TMP-%03d.png" \
          -q -r300 -dBATCH "${pdf[$i]}"
       for j in "${TMPDIR}/Pictures/TMP-"*".png"; do
         mv "$j" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).png"
