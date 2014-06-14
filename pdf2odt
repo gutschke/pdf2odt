@@ -65,7 +65,8 @@ i=0; while [ $i -lt ${#pdf[@]} ]; do
     png|jpg|jpeg)
       if [ "$suffix" = "jpg" ]; then suffix="jpeg"; fi
       # Adjust DPI so that the image fits on a letter-sized page.
-      res="$(identify "${pdf[$i]}"|awk '{ print $3 }')"
+      res="$(identify "${pdf[$i]}")"
+      res="$(echo "x ${res#${pdf[i]}}"|awk '{ print $3 }')"
       dpiX=$((2*${res%x*}/17))
       dpiY=$((${res#*x}/11))
       if [ ${dpiX} -gt ${dpiY} ]; then dpi="${dpiX}"; else dpi="${dpiY}"; fi
