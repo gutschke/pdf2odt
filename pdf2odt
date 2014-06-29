@@ -31,7 +31,14 @@
 
 # Check arguments
 [ $# -ge 2 ] || {
-  echo "Usage: $(basename "$0") input.{jpg,pdf,png} ... output.odt" >&2
+  echo "Usage:" >&2
+  echo "  $(basename "$0") [ options ] input.{jpg,pdf,png} ... output.odt" >&2
+  echo >&2
+  echo "Options:" >&2
+  echo "  --                 Stop scanning for options." >&2
+  echo "  --resolution=RES   Change resolution of embedded images." >&2
+  echo "                     Only affects PDF files. PDF/PNG files will not" >&2
+  echo "                     be rescaled." >&2
   exit 1
 }
 
@@ -58,31 +65,62 @@ mkdir -p "${TMPDIR}"
 # Preprocess image file(s), and convert PDF file(s) to images
 mkdir -p "${TMPDIR}/Pictures"
 pdf=("$@"); unset pdf[$((${#pdf[@]}-1))]
+endofargs=
+resolution=300
 i=0; while [ $i -lt ${#pdf[@]} ]; do
-  suffix="$(echo "${pdf[$i]##*.}"|tr A-Z a-z)"
-  n=$(($(ls "${TMPDIR}/Pictures/Image-"* 2>/dev/null | wc -l) + 1))
-  case "$suffix" in
-    png|jpg|jpeg)
-      if [ "$suffix" = "jpg" ]; then suffix="jpeg"; fi
-      # Adjust DPI so that the image fits on a letter-sized page.
-      res="$(identify "${pdf[$i]}")"
-      res="$(echo "x ${res#${pdf[i]}}"|awk '{ print $3 }')"
-      dpiX=$((2*${res%x*}/17))
-      dpiY=$((${res#*x}/11))
-      if [ ${dpiX} -gt ${dpiY} ]; then dpi="${dpiX}"; else dpi="${dpiY}"; fi
-      convert "${pdf[$i]}" -set units PixelsPerInch -set density "${dpi}" \
-              "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
-      ;;
-    *)
-      gs -dNOPAUSE -sDEVICE=png256 \
-         -sOutputFile="${TMPDIR}/Pictures/TMP-%03d.png" \
-         -q -r300 -dBATCH "${pdf[$i]}"
-      for j in "${TMPDIR}/Pictures/TMP-"*".png"; do
-        mv "$j" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).png"
-        n=$(($n + 1))
-      done
-      ;;
-  esac
+  if [ -z "${endofargs}" -a "x${pdf[$i]#-}" != "x${pdf[$i]}" ]; then
+    case "${pdf[$i]}" in
+      --)
+        endofargs=t
+        ;;
+      --resolution*)
+        if [ "x${pdf[$i]#--resolution=}" != "x${pdf[$i]}" ]; then
+          resolution="${pdf[$i]#--resolution=}"
+        else
+          i=$(($i + 1))
+          resolution="${pdf[$i]}"
+        fi
+        if [ "x${resolution}" != "x${resolution//[^0-9]/}" ] ||
+           [ "${resolution}" -lt 50 -o "${resolution}" -gt 2400 ]; then
+          echo "Invalid resolution \"${resolution}\" provided." >&2
+          exit 1
+        fi
+        ;;
+      *)
+        echo "Unknown command line option \"${pdf[$i]}\"." >&2
+        exit 1
+        ;;
+    esac
+  else
+    if [ ! -r "${pdf[$i]}" ]; then
+      echo "Invalid or non-existent filename \"${pdf[$i]}\"." >&2
+      exit 1
+    fi
+    suffix="$(echo "${pdf[$i]##*.}"|tr A-Z a-z)"
+    n=$(($(ls "${TMPDIR}/Pictures/Image-"* 2>/dev/null | wc -l) + 1))
+    case "$suffix" in
+      png|jpg|jpeg)
+        if [ "$suffix" = "jpg" ]; then suffix="jpeg"; fi
+        # Adjust DPI so that the image fits on a letter-sized page.
+        res="$(identify "${pdf[$i]}")"
+        res="$(echo "x ${res#${pdf[i]}}"|awk '{ print $3 }')"
+        dpiX=$((2*${res%x*}/17))
+        dpiY=$((${res#*x}/11))
+        if [ ${dpiX} -gt ${dpiY} ]; then dpi="${dpiX}"; else dpi="${dpiY}"; fi
+        convert "${pdf[$i]}" -set units PixelsPerInch -set density "${dpi}" \
+                "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
+        ;;
+      *)
+        gs -dNOPAUSE -sDEVICE=png256 \
+           -sOutputFile="${TMPDIR}/Pictures/TMP-%03d.png" \
+           -q -r"${resolution}" -dBATCH "${pdf[$i]}"
+        for j in "${TMPDIR}/Pictures/TMP-"*".png"; do
+          mv "$j" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).png"
+          n=$(($n + 1))
+        done
+        ;;
+    esac
+  fi
   i=$(($i + 1))
 done
 mkdir -p "${TMPDIR}/META-INF"
