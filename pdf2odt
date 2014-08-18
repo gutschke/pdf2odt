@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-# Usage: pdf2odt input.pdf ... output.odt
+# Usage: pdf2{odt,ods} [ options ] input.{jpg,pdf,png} ... output.{odt,ods}
 #
 # This script converts one or more PDF, JPG, or PNG files to an ODT or ODS
 # file. The contents of any PDF file(s) is first converted to a set of image
@@ -61,7 +61,7 @@ i=0; while [ $i -lt ${#pdf[@]} ]; do
       --)
         break
         ;;
-      --format*)
+      --format|--format=*)
         if [ "x${pdf[$i]#--format=}" != "x${pdf[$i]}" ]; then
           format="${pdf[$i]#--format=}"
         else
@@ -74,7 +74,7 @@ i=0; while [ $i -lt ${#pdf[@]} ]; do
           exit 1
         fi
         ;;
-      --paper*)
+      --paper|--paper=*)
         if [ "x${pdf[$i]#--paper=}" != "x${pdf[$i]}" ]; then
           papersize="${pdf[$i]#--paper=}"
         else
@@ -86,10 +86,10 @@ i=0; while [ $i -lt ${#pdf[@]} ]; do
           exit 1
         fi
         ;;
-      --resolution*)
-        if [ "x${pdf[$i]#--resolution=}" = "x${pdf[$i]}" ]; then
-          i=$(($i + 1))
-        fi
+      --resolution=*)
+        ;;
+      --resolution)
+        i=$(($i + 1))
         ;;
       *)
         echo "Unknown command line option \"${pdf[$i]}\"." >&2
@@ -146,15 +146,10 @@ i=0; while [ $i -lt ${#pdf[@]} ]; do
       --)
         endofargs=t
         ;;
-      --format*)
-        if [ "x${pdf[$i]#--format=}" = "x${pdf[$i]}" ]; then
-          i=$(($i + 1))
-        fi
+      --format=*|--paper=*)
         ;;
-      --paper*)
-        if [ "x${pdf[$i]#--paper=}" = "x${pdf[$i]}" ]; then
-          i=$(($i + 1))
-        fi
+      --format|--paper)
+        i=$(($i + 1))
         ;;
       --resolution*)
         if [ "x${pdf[$i]#--resolution=}" != "x${pdf[$i]}" ]; then
