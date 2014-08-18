@@ -47,6 +47,7 @@ export LC_ALL=C
 # Attempt to deduce the output file format from the output file name.
 eval out="\${$#}"
 format="${out##*.}"; format="${format,,}"
+[ "x${format}" = "xodt" -o "x${format}" = "xods" ] || format="${0: -3}"
 [ "x${format}" = "xodt" -o "x${format}" = "xods" ] || format="odt"
 
 # Select default papersize.
