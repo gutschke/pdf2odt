@@ -37,10 +37,14 @@ export LC_ALL=C
   echo "Options:" >&2
   echo "  --                   Stop scanning for options." >&2
   echo "  --format={odt|ods}   Select output file format." >&2
+  echo "  --margin=X{cm|in}    Add extra margin around input files." >&2
   echo "  --paper={letter|a4}  Select paper size." >&2
+  echo "  --portrait           Portrait is always the default orientation." >&2
+  echo "  --landscape          Assume all input files are in landscape format." >&2
   echo "  --resolution=RES     Change resolution of embedded images." >&2
   echo "                       Only affects PDF files. PDF/PNG files will not" >&2
   echo "                       be rescaled." >&2
+  echo "  --trim|--no-trim     Attempt to trim existing margins from input files." >&2
   exit 1
 }
 
@@ -56,18 +60,20 @@ papersize="${PAPERSIZE:-$(cat "${PAPERCONF:-/etc/papersize}" 2>/dev/null)}"
 
 # Parse position-independent command line flags.
 pdf=("$@"); unset pdf[$((${#pdf[@]}-1))]
-i=0; while [ $i -lt ${#pdf[@]} ]; do
-  if [ "x${pdf[$i]#-}" != "x${pdf[$i]}" ]; then
-    case "${pdf[$i]}" in
+margin="0in"
+orientation="portrait"
+i=0; while [ ${i} -lt ${#pdf[@]} ]; do
+  if [ "x${pdf[${i}]#-}" != "x${pdf[${i}]}" ]; then
+    case "${pdf[${i}]}" in
       --)
         break
         ;;
       --format|--format=*)
-        if [ "x${pdf[$i]#--format=}" != "x${pdf[$i]}" ]; then
-          format="${pdf[$i]#--format=}"
+        if [ "x${pdf[${i}]#--format=}" != "x${pdf[${i}]}" ]; then
+          format="${pdf[${i}]#--format=}"
         else
-          i=$(($i + 1))
-          format="${pdf[$i]}"
+          i=$((${i} + 1))
+          format="${pdf[${i}]}"
         fi
         format="${format,,}"
         if [ "x${format}" != "xodt" -a "x${format}" != "xods" ]; then
@@ -75,35 +81,58 @@ i=0; while [ $i -lt ${#pdf[@]} ]; do
           exit 1
         fi
         ;;
-      --paper|--paper=*)
-        if [ "x${pdf[$i]#--paper=}" != "x${pdf[$i]}" ]; then
-          papersize="${pdf[$i]#--paper=}"
+      --margin|--margin=*)
+        if [ "x${pdf[${i}]#--margin=}" != "x${pdf[${i}]}" ]; then
+          margin="${pdf[${i}]#--margin=}"
         else
-          i=$(($i + 1))
-          papersize="${pdf[$i]}"
+          i=$((${i} + 1))
+          margin="${pdf[${i}]}"
+        fi
+        if [ "x${margin%in}" == "x${margin}" -a \
+             "x${margin%cm}" == "x${margin}" ]; then
+          echo "Unsupported margin \"${margin}\" provided." >&2
+          exit 1
+        else
+          margin="${margin/-/_}"
+        fi
+        ;;
+      --paper|--paper=*)
+        if [ "x${pdf[${i}]#--paper=}" != "x${pdf[${i}]}" ]; then
+          papersize="${pdf[${i}]#--paper=}"
+        else
+          i=$((${i} + 1))
+          papersize="${pdf[${i}]}"
         fi
         if [ "x${papersize}" != "xletter" -a "x${papersize}" != "xa4" ]; then
           echo "Unsupported paper size \"${papersize}\" provided." >&2
           exit 1
         fi
         ;;
+      --portrait)
+        orientation="portrait"
+        ;;
+      --landscape)
+        orientation="landscape"
+        ;;
       --resolution=*)
         ;;
       --resolution)
-        i=$(($i + 1))
+        i=$((${i} + 1))
+        ;;
+      --trim|--no-trim)
         ;;
       *)
-        echo "Unknown command line option \"${pdf[$i]}\"." >&2
+        echo "Unknown command line option \"${pdf[${i}]}\"." >&2
         exit 1
         ;;
     esac
   else
-    if [ ! -r "${pdf[$i]}" ]; then
-      echo "Invalid or non-existent filename \"${pdf[$i]}\"." >&2
+    if [ ! -r "${pdf[${i}]}" ]; then
+      echo "Invalid or non-existent filename \"${pdf[${i}]}\"." >&2
       exit 1
     fi
   fi
-  i=$(($i + 1))
+  i=$((${i} + 1))
 done
 [ "${format}" = odt ] && formatname="Text" || formatname="Spreadsheet"
 if [ "${papersize}" = "letter" ]; then
@@ -111,11 +140,26 @@ if [ "${papersize}" = "letter" ]; then
   units2inch="1"
   width="8.5"
   height="11"
+  if [ "x${margin%in}" != "x${margin}" ]; then
+    margin="${margin%in}"
+  else
+    margin="$(dc -e "3k ${margin%cm} 2.54/p")"
+  fi
 else
   units="mm"
   units2inch="25.4"
   width="210"
   height="297"
+  if [ "x${margin%cm}" != "x${margin}" ]; then
+    margin="${margin%cm}"
+  else
+    margin="$(dc -e "3k ${margin%in} 2.54*p")"
+  fi
+fi
+if [ "${orientation}" != "portrait" ]; then
+  w="${width}"
+  width="${height}"
+  height="${w}"
 fi
 
 # Don't overwrite the output file, unless it is an ODT/ODS file already.
@@ -137,27 +181,38 @@ TMPDIR="/tmp/pdf2odt.$$"
 trap 'rm -rf "${TMPDIR}"' EXIT INT TERM QUIT HUP
 mkdir -p "${TMPDIR}"
 
+# Adjust DPI so that the image fits on a letter- or a4-sized page.
+function scale() {
+  local res="$(identify "${1}")"
+  res="$(echo "x ${res#${1}}"|awk '{ print $3 }')"
+  local dpiX=$(dc -e "3k ${res%x*} ${width} ${margin} 2*- ${units2inch}/0k/p")
+  local dpiY=$(dc -e "3k ${res#*x} ${height} ${margin} 2*- ${units2inch}/0k/p")
+  [ ${dpiX} -gt ${dpiY} ] && local dpi="${dpiX}" || local dpi="${dpiY}"
+  convert "${1}" -set units PixelsPerInch -set density "${dpi}" "${2}"
+}
+
 # Preprocess image file(s), and convert PDF file(s) to images
 mkdir -p "${TMPDIR}/Pictures"
 endofargs=
 resolution=300
-i=0; while [ $i -lt ${#pdf[@]} ]; do
-  if [ -z "${endofargs}" -a "x${pdf[$i]#-}" != "x${pdf[$i]}" ]; then
-    case "${pdf[$i]}" in
+trim=
+i=0; while [ ${i} -lt ${#pdf[@]} ]; do
+  if [ -z "${endofargs}" -a "x${pdf[${i}]#-}" != "x${pdf[${i}]}" ]; then
+    case "${pdf[${i}]}" in
       --)
         endofargs=t
         ;;
-      --format=*|--paper=*)
+      --format=*|--margin=*|--paper=*|--portrait|--landscape)
         ;;
-      --format|--paper)
-        i=$(($i + 1))
+      --format|--margin|--paper)
+        i=$((${i} + 1))
         ;;
       --resolution*)
-        if [ "x${pdf[$i]#--resolution=}" != "x${pdf[$i]}" ]; then
-          resolution="${pdf[$i]#--resolution=}"
+        if [ "x${pdf[${i}]#--resolution=}" != "x${pdf[${i}]}" ]; then
+          resolution="${pdf[${i}]#--resolution=}"
         else
-          i=$(($i + 1))
-          resolution="${pdf[$i]}"
+          i=$((${i} + 1))
+          resolution="${pdf[${i}]}"
         fi
         if [ "x${resolution}" != "x${resolution//[^0-9]/}" ] ||
            [ "${resolution}" -lt 50 -o "${resolution}" -gt 2400 ]; then
@@ -165,38 +220,48 @@ i=0; while [ $i -lt ${#pdf[@]} ]; do
           exit 1
         fi
         ;;
+      --trim)
+        trim="t"
+        ;;
+      --no-trim)
+        trim=
+        ;;
       *)
-        echo "Unknown command line option \"${pdf[$i]}\"." >&2
+        echo "Unknown command line option \"${pdf[${i}]}\"." >&2
         exit 1
         ;;
     esac
   else
-    suffix="${pdf[$i]##*.}"; suffix="${suffix,,}"
+    suffix="${pdf[${i}]##*.}"; suffix="${suffix,,}"
     n=$(($(ls "${TMPDIR}/Pictures/Image-"* 2>/dev/null | wc -l) + 1))
     case "$suffix" in
       png|jpg|jpeg)
         if [ "$suffix" = "jpg" ]; then suffix="jpeg"; fi
-        # Adjust DPI so that the image fits on a letter- or a4-sized page.
-        res="$(identify "${pdf[$i]}")"
-        res="$(echo "x ${res#${pdf[i]}}"|awk '{ print $3 }')"
-        dpiX=$(dc -e "${res%x*} ${width} ${units2inch}//p")
-        dpiY=$(dc -e "${res#*x} ${height} ${units2inch}//p")
-        if [ ${dpiX} -gt ${dpiY} ]; then dpi="${dpiX}"; else dpi="${dpiY}"; fi
-        convert "${pdf[$i]}" -set units PixelsPerInch -set density "${dpi}" \
-                "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
+        in="${pdf[${i}]}"
+        out="${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
+        [ -n "${trim}" ] && { convert "${in}" "${out}"; in="${out}"; }
+        scale "${in}" "${out}"
         ;;
       *)
         gs -dNOPAUSE -sDEVICE=png256 \
            -sOutputFile="${TMPDIR}/Pictures/TMP-%03d.png" \
-           -q -r"${resolution}" -dBATCH "${pdf[$i]}"
+           -q -r"${resolution}" -dBATCH "${pdf[${i}]}"
         for j in "${TMPDIR}/Pictures/TMP-"*".png"; do
-          mv "$j" "${TMPDIR}/Pictures/Image-$(printf '%03d' $n).png"
-          n=$(($n + 1))
+          in="${j}"
+          out="${TMPDIR}/Pictures/Image-$(printf '%03d' $n).png"
+          [ -n "${trim}" ] && { convert "${in}" "${out}"; in="${out}"; }
+          if [ "${margin}" != "0" ]; then
+            scale "${in}" "${out}"
+            [ "${in}" != "${out}" ] && rm -f "${in}"
+          elif [ "${in}" != "${out}" ]; then
+            mv "${in}" "${out}"
+          fi
+          n=$((${n} + 1))
         done
         ;;
     esac
   fi
-  i=$(($i + 1))
+  i=$((${i} + 1))
 done
 mkdir -p "${TMPDIR}/META-INF"
 
@@ -335,7 +400,7 @@ cat <<'EOF'
   <office:automatic-styles>
 EOF
 ls "${TMPDIR}/Pictures/"*.{png,jpeg} 2>/dev/null | sort | \
-  sed 's/^.*\/Pictures\/Image-\([0-9]*\)[.]\(.*\)/    <style:page-layout style:name="Image\1"><style:page-layout-properties fo:page-width="'"${width}${units}"'" fo:page-height="'"${height}${units}"'" style:num-format="1" style:print-orientation="portrait" fo:margin-top="0in" fo:margin-bottom="0in" fo:margin-left="0in" fo:margin-right="0in" fo:background-color="transparent" style:writing-mode="lr-tb" style:footnote-max-height="0in"><style:background-image xlink:href="Pictures\/Image-\1.\2" xlink:type="simple" xlink:actuate="onLoad" style:position="center center" style:repeat="no-repeat"\/><\/style:page-layout-properties><\/style:page-layout>/'
+  sed 's/^.*\/Pictures\/Image-\([0-9]*\)[.]\(.*\)/    <style:page-layout style:name="Image\1"><style:page-layout-properties fo:page-width="'"${width}${units}"'" fo:page-height="'"${height}${units}"'" style:num-format="1" style:print-orientation="'"${orientation}"'" fo:margin-top="0in" fo:margin-bottom="0in" fo:margin-left="0in" fo:margin-right="0in" fo:background-color="transparent" style:writing-mode="lr-tb" style:footnote-max-height="0in"><style:background-image xlink:href="Pictures\/Image-\1.\2" xlink:type="simple" xlink:actuate="onLoad" style:position="center center" style:repeat="no-repeat"\/><\/style:page-layout-properties><\/style:page-layout>/'
 cat <<'EOF'
   </office:automatic-styles>
   <office:master-styles>
