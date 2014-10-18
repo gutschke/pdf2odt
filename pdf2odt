@@ -50,7 +50,7 @@ export LC_ALL=C
 
 # Attempt to deduce the output file format from the output file name.
 eval out="\${$#}"
-format="${out##*.}"; format="${format,,}"
+format="${out##*.}"; format="$(printf '%s' "${format}"|tr A-Z a-z)"
 [ "x${format}" = "xodt" -o "x${format}" = "xods" ] || format="${0: -3}"
 [ "x${format}" = "xodt" -o "x${format}" = "xods" ] || format="odt"
 
@@ -75,7 +75,7 @@ i=0; while [ ${i} -lt ${#pdf[@]} ]; do
           i=$((${i} + 1))
           format="${pdf[${i}]}"
         fi
-        format="${format,,}"
+        format="$(printf '%s' "${format}"|tr A-Z a-z)"
         if [ "x${format}" != "xodt" -a "x${format}" != "xods" ]; then
           echo "Unsupported output format \"${format}\"." >&2
           exit 1
@@ -168,7 +168,7 @@ fi
 if [ -e "${out}" ] &&
    [[ ! "$(file "${out}" 2>/dev/null)" =~ "OpenDocument ${formatname}" ]]; then
   echo "Did you forget to specify the output file name? \"${out}\"" \
-       "exists, but is not an ${format^^} file" >&2
+       "exists, but is not an $(printf '%s' "${format}"|tr a-z A-Z) file" >&2
   exit 1
 fi
 
@@ -214,7 +214,7 @@ i=0; while [ ${i} -lt ${#pdf[@]} ]; do
           i=$((${i} + 1))
           resolution="${pdf[${i}]}"
         fi
-        if [ "x${resolution}" != "x${resolution//[^0-9]/}" ] ||
+        if [ "x${resolution}" != "x$(printf '%s' "${resolution}"|sed 's/[^0-9]//')" ] ||
            [ "${resolution}" -lt 50 -o "${resolution}" -gt 2400 ]; then
           echo "Invalid resolution \"${resolution}\" provided." >&2
           exit 1
@@ -232,15 +232,15 @@ i=0; while [ ${i} -lt ${#pdf[@]} ]; do
         ;;
     esac
   else
-    suffix="${pdf[${i}]##*.}"; suffix="${suffix,,}"
+    suffix="${pdf[${i}]##*.}"; suffix="$(printf '%s' "${suffix}"|tr A-Z a-z)"
     n=$(($(ls "${TMPDIR}/Pictures/Image-"* 2>/dev/null | wc -l) + 1))
     case "$suffix" in
       png|jpg|jpeg)
         if [ "$suffix" = "jpg" ]; then suffix="jpeg"; fi
         in="${pdf[${i}]}"
-        out="${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
-        [ -n "${trim}" ] && { convert "${in}" "${out}"; in="${out}"; }
-        scale "${in}" "${out}"
+        ot="${TMPDIR}/Pictures/Image-$(printf '%03d' $n).$suffix"
+        [ -n "${trim}" ] && { convert "${in}" "${ot}"; in="${ot}"; }
+        scale "${in}" "${ot}"
         ;;
       *)
         gs -dNOPAUSE -sDEVICE=png256 \
@@ -248,13 +248,13 @@ i=0; while [ ${i} -lt ${#pdf[@]} ]; do
            -q -r"${resolution}" -dBATCH "${pdf[${i}]}"
         for j in "${TMPDIR}/Pictures/TMP-"*".png"; do
           in="${j}"
-          out="${TMPDIR}/Pictures/Image-$(printf '%03d' $n).png"
-          [ -n "${trim}" ] && { convert "${in}" "${out}"; in="${out}"; }
+          ot="${TMPDIR}/Pictures/Image-$(printf '%03d' $n).png"
+          [ -n "${trim}" ] && { convert "${in}" "${ot}"; in="${ot}"; }
           if [ "${margin}" != "0" ]; then
-            scale "${in}" "${out}"
-            [ "${in}" != "${out}" ] && rm -f "${in}"
-          elif [ "${in}" != "${out}" ]; then
-            mv "${in}" "${out}"
+            scale "${in}" "${ot}"
+            [ "${in}" != "${ot}" ] && rm -f "${in}"
+          elif [ "${in}" != "${ot}" ]; then
+            mv "${in}" "${ot}"
           fi
           n=$((${n} + 1))
         done
@@ -266,13 +266,13 @@ done
 mkdir -p "${TMPDIR}/META-INF"
 
 # Create "mimetype" file
-printf '%s' "application/vnd.oasis.opendocument.${formatname,,}" >"${TMPDIR}/mimetype"
+printf '%s' "application/vnd.oasis.opendocument.$(printf '%s' "${formatname}"|tr A-Z a-z)" >"${TMPDIR}/mimetype"
 
 # Create "META-INF/manifest.xml" file
 { cat <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">
-  <manifest:file-entry manifest:media-type="application/vnd.oasis.opendocument.${formatname,,}" manifest:version="1.2" manifest:full-path="/"/>
+  <manifest:file-entry manifest:media-type="application/vnd.oasis.opendocument.$(printf '%s' "${formatname}"|tr A-Z a-z)" manifest:version="1.2" manifest:full-path="/"/>
   <manifest:file-entry manifest:media-type="text/xml" manifest:full-path="content.xml"/>
   <manifest:file-entry manifest:media-type="text/xml" manifest:full-path="styles.xml"/>
 EOF
