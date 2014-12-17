@@ -55,7 +55,7 @@ format="${out##*.}"; format="$(printf '%s' "${format}"|tr A-Z a-z)"
 [ "x${format}" = "xodt" -o "x${format}" = "xods" ] || format="odt"
 
 # Select default papersize.
-papersize="${PAPERSIZE:-$(cat "${PAPERCONF:-/etc/papersize}" 2>/dev/null)}"
+papersize="${PAPERSIZE:-$(cat "${PAPERCONF:-/etc/papersize}" 2>/dev/null || :)}"
 [ "x${papersize}" != "a4" ] && papersize="letter"
 
 # Parse position-independent command line flags.
