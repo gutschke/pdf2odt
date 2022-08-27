@@ -172,14 +172,45 @@ if [ -e "${out}" ] &&
   exit 1
 fi
 
-# Set up temporary staging directory
-TMPDIR="/tmp/pdf2odt.$$"
-[ \! -e "${TMPDIR}" ] || {
-  echo "Staging directory ${TMPDIR} already exists" >&2
-  exit 1
-}
+# Set up temporary staging directory. In an ideal world, we'd use "mktemp -d",
+# but this feature doesn't necessarily exist on all supported platforms. If
+# necessary, we fall back on finding a unique filename in the system-wide
+# temporary directory and then creating a staging directory for our own use. An
+# attempt will be made to restrict permissions. Also, we honor the value
+# of "${TMPDIR}" if it is set. For more security-sensitive applications,
+# setting "${TMPDIR}" to a suitable unique per-invocation value before calling
+# "pdf2odt" might be a good idea.
+if ! STAGING="$(mktemp -d)" 2>/dev/null || [ -z "${STAGING}" ]; then
+  # Create parent directory, if it doesn't exist. This allows us to later call
+  # "mkdir" instead of "mkdir -p". As a result, any parent directories will be
+  # created with the default umask. This is probably what our caller expected.
+  # But hard to say, as this is such an unusual use case. Typically "${TMPDIR}"
+  # would be expected to exist, after all.
+  [ -n "${TMPDIR}" -a ! -d "${TMPDIR}" ] &&
+    mkdir -p "${TMPDIR}" 2>/dev/null || :
+  # Iterate to find a unique name for our staging directory.
+  i=
+  while :; do
+    STAGING="${TMPDIR:-/tmp}/pdf2odt.$$${i:+.${i}}"
+    if ! [ -x "${STAGING}" ]; then
+      # Use umask in a sub-shell to restrict permissions. Hope for the best
+      # that "mkdir" creates the directory atomically or fails.
+      ( umask 0077; mkdir "${STAGING}" ) && break
+      # There are all sorts of reasons why "mkdir" could fail. But we are
+      # only prepared to deal with cases where the failure is a result of a
+      # pre-existing conflicting file name. In order to prevent infinite
+      # looping, we fail hard, if that doesn't appear to be the case.
+      [ -d "${STAGING}" ] || {
+        echo "Failed to create temporary staging directory." >&2; exit 1; }
+    fi
+    i=$((i+1))
+  done
+fi
+# Force all third parties to write to our staging directory.
+export TMPDIR="${STAGING}"
+
+# Clean up our staging directory, if we exit unexpectedly
 trap 'rm -rf "${TMPDIR}"' EXIT INT TERM QUIT HUP
-mkdir -p "${TMPDIR}"
 
 # Adjust DPI so that the image fits on a letter- or a4-sized page.
 function scale() {
